@@ -4,10 +4,16 @@ require("dotenv").config();
 
 module.exports.createAccessToken = (user) => {
 	const data = {
-		id: user._id,
+		id: user._id || user.id,
 		email: user.email,
 		isAdmin: user.isAdmin
 	}
+	
+	// Include any additional properties (like resetOnly)
+	if (user.resetOnly !== undefined) {
+		data.resetOnly = user.resetOnly;
+	}
+	
 	return jwt.sign(data, process.env.JWT_SECRET_KEY, {});
 }
 

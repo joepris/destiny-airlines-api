@@ -37,7 +37,17 @@ const userSchema = new mongoose.Schema({
     memberSince: {
         type: Date,
         default: Date.now
-    }
+    },
+    securityQuestions: [{
+        question: {
+            type: String,
+            required: false
+        },
+        answer: {
+            type: String,
+            required: false
+        }
+    }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

@@ -37,6 +37,7 @@ function resolveCabinClass(seats) {
 
 module.exports.getBookings = (req, res, next) => {
   return Booking.find({ userId: req.user.id })
+    .populate('flightId')
     .then((bookings) => {
       if (bookings) {
         res.status(200).send({ bookings: bookings, status: 200 });
@@ -57,6 +58,7 @@ module.exports.getBookingById = (req, res, next) => {
     }
 
     return Booking.findById(bookingId)
+        .populate('flightId')
         .then((booking) => {
             if (booking) {
                 res.status(200).send({ booking: booking, status: 200 });
@@ -69,6 +71,7 @@ module.exports.getBookingById = (req, res, next) => {
 
 module.exports.getAllBookings = (req, res, next) => {
     return Booking.find({})
+        .populate('flightId')
         .then((bookings) => {
             if (bookings && bookings.length > 0) {
                 res.status(200).send({ bookings: bookings, status: 200 });
@@ -87,6 +90,7 @@ module.exports.getBookingsByFlightId = (req, res, next) => {
     }
 
     return Booking.find({ flightId: flightId })
+        .populate('flightId')
         .then((bookings) => {
             if (bookings && bookings.length > 0) {
                 res.status(200).send({ bookings: bookings, status: 200 });
@@ -105,6 +109,7 @@ module.exports.getBookingsByUserId = (req, res, next) => {
     }
 
     return Booking.find({ userId: userId })
+        .populate('flightId')
         .then((bookings) => {
             if (bookings && bookings.length > 0) {
                 res.status(200).send({ bookings: bookings, status: 200 });

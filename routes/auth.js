@@ -10,6 +10,12 @@ router.post("/login", authController.loginUser);
 
 router.post("/logout", authController.logoutUser);
 
+router.post("/get-security-questions", authController.getSecurityQuestions);
+
+router.post("/verify-security-answers", authController.verifySecurityAnswers);
+
+router.post("/reset-password-with-token", authController.resetPasswordWithToken);
+
 router.post("/forgot-password", authController.resetPassword);
 
 module.exports = router;
