@@ -1,6 +1,6 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const userController = require('../controllers/user');
+const userController = require("../controllers/user");
 const { verify, verifyAdmin } = require("../auth");
 
 router.get("/", verify, verifyAdmin, userController.getAllUsers);
@@ -11,6 +11,6 @@ router.get("/:id", verify, verifyAdmin, userController.getUserById);
 
 // router.post('/reset-password', verify, userController.resetPassword);
 
-router.put('/update-profile', verify, userController.updateProfile);
+router.put("/update-profile", verify, userController.updateProfile);
 
 module.exports = router;
