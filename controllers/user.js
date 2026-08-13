@@ -58,4 +58,27 @@ module.exports.addFrequentFlyerPoints = async (userId, price) => {
   await user.save();
 };
 
+module.exports.redeemFrequentFlyerPoints = async (userId, points, session) => {
+  const query = User.findById(userId);
+  if (session) query.session(session);
+
+  const user = await query;
+  if (!user) {
+    const err = new Error("User not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const needed = Math.max(0, Math.round(Number(points) || 0));
+  if (user.frequentFlyerPoints < needed) {
+    const err = new Error("Not enough Destiny Guest Points for this booking.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  user.frequentFlyerPoints -= needed;
+  await user.save(session ? { session } : undefined);
+  return user.frequentFlyerPoints;
+};
+
 module.exports.getAllUsersByAdmin;

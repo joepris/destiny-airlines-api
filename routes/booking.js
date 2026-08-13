@@ -25,6 +25,8 @@ router.get(
 
 router.get("/:id", verify, bookingController.getBookingById);
 
+router.patch("/:id/seats", verify, bookingController.changeBookingSeats);
+
 router.patch("/:id", verify, bookingController.modifyBooking);
 
 router.delete("/:id", verify, bookingController.cancelBooking);

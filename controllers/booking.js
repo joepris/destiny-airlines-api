@@ -4,9 +4,11 @@ const Payment = require("../models/Payment");
 const Seat = require("../models/Seat");
 const Flight = require("../models/Flight");
 const { createPayment } = require("./payment");
+const { redeemFrequentFlyerPoints } = require("./user");
 
 const VALID_PAYMENT_METHODS = ["card", "gcash", "maya", "bank", "miles"];
 const VALID_SEAT_CLASSES = ["First", "Business", "Economy"];
+const POINTS_PER_CURRENCY = 5;
 
 function generateRef(prefix) {
   return `${prefix}-${Date.now().toString(36).toUpperCase()}${Math.random()
@@ -278,6 +280,11 @@ module.exports.createBookingWithPayment = async (req, res) => {
       price: Number(service.price ?? 0),
     }));
 
+    if (paymentMethod === "miles") {
+      const pointsNeeded = Math.round(Number(total) * POINTS_PER_CURRENCY);
+      await redeemFrequentFlyerPoints(authUserId, pointsNeeded, session);
+    }
+
     const savedBooking = await createBooking({
       userId: authUserId,
       flightId,
@@ -313,6 +320,171 @@ module.exports.createBookingWithPayment = async (req, res) => {
     return res.status(error.statusCode || 400).json({
       success: false,
       message: error.statusCode ? error.message : "Database transaction failed",
+      error: error.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+module.exports.changeBookingSeats = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const bookingId = req.params.id || req.params.bookingId;
+    const userId = req.user?.id;
+    const { selectedSeats = [] } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      const err = new Error("Invalid booking ID");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const booking = await Booking.findById(bookingId).session(session);
+    if (!booking) {
+      const err = new Error("Booking not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (String(booking.userId) !== String(userId) && !req.user?.isAdmin) {
+      const err = new Error("You can only change seats on your own booking.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (booking.status === "cancelled") {
+      const err = new Error("Cancelled bookings cannot change seats.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const currentSeats = booking.seats || [];
+    if (!Array.isArray(selectedSeats) || selectedSeats.length !== currentSeats.length) {
+      const err = new Error(
+        `Select exactly ${currentSeats.length} seat${currentSeats.length === 1 ? "" : "s"}.`,
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const newSeatIds = selectedSeats
+      .map((seat) => seat.dbId || seat.seatId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+
+    if (newSeatIds.length !== selectedSeats.length) {
+      const err = new Error("Each seat must include a valid ID.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const uniqueNewIds = new Set(newSeatIds.map(String));
+    if (uniqueNewIds.size !== newSeatIds.length) {
+      const err = new Error("Each passenger must have a different seat.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const dbSeats = await Seat.find({
+      _id: { $in: newSeatIds },
+      flightId: booking.flightId,
+    }).session(session);
+
+    if (dbSeats.length !== newSeatIds.length) {
+      const err = new Error("One or more seats do not belong to this flight.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const currentSeatIds = new Set(
+      currentSeats.map((s) => String(s.seatId)).filter(Boolean),
+    );
+
+    const alreadyBooked = dbSeats.filter(
+      (s) => s.isBooked && !currentSeatIds.has(String(s._id)),
+    );
+    if (alreadyBooked.length > 0) {
+      const err = new Error(
+        `Seat(s) already booked: ${alreadyBooked.map((s) => s.seatNumber).join(", ")}`,
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const countByClass = (seats, getClass) => {
+      const counts = {};
+      for (const seat of seats) {
+        const seatClass = normalizeSeatClass(getClass(seat));
+        counts[seatClass] = (counts[seatClass] || 0) + 1;
+      }
+      return counts;
+    };
+
+    const currentClassCounts = countByClass(currentSeats, (s) => s.seatClass);
+    const newClassCounts = countByClass(dbSeats, (s) => s.classType);
+
+    for (const seatClass of VALID_SEAT_CLASSES) {
+      if ((currentClassCounts[seatClass] || 0) !== (newClassCounts[seatClass] || 0)) {
+        const allowed = Object.keys(currentClassCounts)
+          .filter((cls) => currentClassCounts[cls] > 0)
+          .join(" / ");
+        const err = new Error(
+          `You can only change to ${allowed} class seat${currentSeats.length === 1 ? "" : "s"}.`,
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const toRelease = [...currentSeatIds].filter((id) => !uniqueNewIds.has(id));
+    const toBook = newSeatIds.filter((id) => !currentSeatIds.has(String(id)));
+
+    if (toRelease.length > 0) {
+      await Seat.updateMany(
+        { _id: { $in: toRelease } },
+        { $set: { isBooked: false } },
+        { session },
+      );
+    }
+
+    if (toBook.length > 0) {
+      await Seat.updateMany(
+        { _id: { $in: toBook } },
+        { $set: { isBooked: true } },
+        { session },
+      );
+    }
+
+    const seatById = new Map(dbSeats.map((seat) => [String(seat._id), seat]));
+    const formattedSeats = selectedSeats.map((incoming) => {
+      const seat = seatById.get(String(incoming.dbId || incoming.seatId));
+      return {
+        seatId: seat._id,
+        seatNumber: seat.seatNumber,
+        seatClass: normalizeSeatClass(seat.classType),
+        fee: Number(incoming.price ?? incoming.fee ?? 0),
+      };
+    });
+
+    booking.seats = formattedSeats;
+    booking.class = resolveCabinClass(formattedSeats);
+    await booking.save({ session });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message: "Seats updated successfully",
+      booking,
+      status: 200,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to update seats",
       error: error.message,
     });
   } finally {

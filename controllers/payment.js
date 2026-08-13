@@ -31,7 +31,9 @@ async function createPayment({ bookingId, userId, amount, method, session }) {
         paidAt
     }], { session });
 
-    await addFrequentFlyerPoints(userId, amount);
+    if (method !== "miles") {
+        await addFrequentFlyerPoints(userId, amount);
+    }
 
     return payment;
 }
